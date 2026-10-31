@@ -1,20 +1,19 @@
 """
 app.py - Sistem web deteksi keramaian lab
 =========================================
-Server Flask yang memuat model terbaik hasil notebook. Halaman web merekam
-mikrofon lab lewat browser, mengirim audio ke server tiap 1 detik, dan
-server menilai jendela 5 detik terakhir. Jika lab ramai, halaman memutar
-teguran "sssttt... jangan ramai".
+Memakai model terbaik dari notebook `klasifikasi-audio.ipynb`
+(file model/model_terbaik.joblib yang dibuat di Bab 9 notebook).
 
 Menjalankan:
-    python app.py                    # buka http://localhost:5000 di PC lab
-    python app.py --port 8000
-    python app.py --host 0.0.0.0     # bisa diakses PC lain (lihat README soal HTTPS)
+    python app.py               # buka http://localhost:5000 di PC lab
+    python app.py --dev         # mode pengembangan (restart otomatis saat file diubah)
+    gunicorn app:app --workers 1 --threads 8 --bind 0.0.0.0:$PORT   # hosting online
 
-Alur audio (sama dengan training):
-    mic browser (sample rate asli, PCM 16-bit) -> buffer 5 detik per sesi
-    -> librosa.resample ke 16 kHz -> fitur_audio.ekstrak_fitur (32 fitur)
-    -> model.predict_proba -> aturan 3 dari 4 + cooldown -> teguran
+Alur mode Pantau:
+    mic browser (sample rate asli, PCM 16-bit, tiap 1 detik) -> buffer per sesi
+    -> ambil jendela N detik terakhir (default 5) -> resample 16 kHz polifase
+    -> pipeline notebook (chunk 5 dtk, buang hening -80 dBFS, 32 fitur mean/std)
+    -> model.predict_proba -> aturan "3 dari 4" + jeda -> teguran
 """
 
 import argparse
@@ -26,25 +25,28 @@ import time
 import uuid
 from datetime import datetime
 
-import librosa
 import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, send_file
 
 import fitur_audio as fa
-from deteksi_lab import Detektor, Pencatat, muat_model
+from detektor import Detektor, Pencatat, muat_model, nilai_sinyal, prob_berisik
 
 LOKASI = os.path.dirname(os.path.abspath(__file__))
 PATH_MODEL = os.path.join(LOKASI, "model", "model_terbaik.joblib")
 PATH_SUARA = os.path.join(LOKASI, "suara", "peringatan.wav")
 PATH_LOG = os.path.join(LOKASI, "hasil", "log_deteksi.csv")
+PATH_CONTOH = os.path.join(LOKASI, "contoh")
+EKSTENSI_AUDIO = (".mp3", ".wav", ".flac", ".ogg", ".m4a")
+PILIHAN_JENDELA = (5, 10, 15, 20, 30)     # kelipatan 5 detik (panjang chunk notebook)
+JENDELA_MAKS = max(PILIHAN_JENDELA)
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024   # batas upload 50 MB
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
-PAKET = None          # diisi di muat()
+PAKET = None
 PENCATAT = None
 KUNCI_LOG = threading.Lock()
-RIWAYAT_TEGURAN = collections.deque(maxlen=200)   # untuk ditampilkan di web
+RIWAYAT_TEGURAN = collections.deque(maxlen=200)
 SESI = {}
 KUNCI_SESI = threading.Lock()
 
@@ -59,7 +61,7 @@ def bersihkan(obj):
     if isinstance(obj, (list, tuple)):
         return [bersihkan(v) for v in obj]
     if isinstance(obj, np.generic):
-        return obj.item()
+        obj = obj.item()
     if isinstance(obj, float) and not np.isfinite(obj):
         return None
     return obj
@@ -77,15 +79,25 @@ def angka(nilai, bawaan, tipe=float, minimum=None, maksimum=None):
     return x
 
 
+def jendela_valid(nilai, bawaan=fa.DURASI_CHUNK):
+    j = angka(nilai, bawaan, int)
+    return j if j in PILIHAN_JENDELA else bawaan
+
+
+def ambang_bawaan():
+    return PAKET.get("ambang_proba", 0.5)
+
+
 class Sesi:
     """Satu tab browser yang sedang mendengarkan mikrofon."""
 
     def __init__(self, pengaturan):
         self.kunci = threading.Lock()
-        self.buffer = np.zeros(0, dtype=np.float32)   # sample rate asli mic
+        self.buffer = np.zeros(0, dtype=np.float32)   # sample rate asli mikrofon
         self.sr = None
+        self.jendela = fa.DURASI_CHUNK
         self.terakhir_aktif = time.time()
-        self.detektor = Detektor(PAKET, PAKET.get("ambang_proba", 0.5), 3, 4, 30.0)
+        self.detektor = Detektor(PAKET, ambang_bawaan(), 3, 4, 30.0)
         self.atur(pengaturan)
 
     def atur(self, p):
@@ -96,20 +108,20 @@ class Sesi:
         d.konfirmasi = angka(p.get("konfirmasi"), d.konfirmasi, int, 1, riwayat)
         if riwayat != d.riwayat.maxlen:
             d.riwayat = collections.deque(d.riwayat, maxlen=riwayat)
+        self.jendela = jendela_valid(p.get("jendela"), self.jendela)
 
     def pengaturan(self):
         d = self.detektor
-        return dict(ambang=d.ambang, cooldown=d.cooldown,
-                    konfirmasi=d.konfirmasi, riwayat=d.riwayat.maxlen)
+        return dict(ambang=d.ambang, cooldown=d.cooldown, konfirmasi=d.konfirmasi,
+                    riwayat=d.riwayat.maxlen, jendela=self.jendela)
 
 
 def ambil_sesi(sid):
     with KUNCI_SESI:
-        s = SESI.get(sid)
-        # bersihkan sesi yang ditinggal > 10 menit
-        batas = time.time() - 600
+        batas = time.time() - 600                      # sesi ditinggal > 10 menit dihapus
         for k in [k for k, v in SESI.items() if v.terakhir_aktif < batas]:
             SESI.pop(k, None)
+        s = SESI.get(sid)
     if s is None:
         abort(404, description="Sesi tidak ditemukan, muat ulang halaman.")
     s.terakhir_aktif = time.time()
@@ -134,17 +146,23 @@ def beranda():
 
 @app.get("/api/info")
 def info():
-    m = PAKET.get("metrik_uji", {})
     return jsonify(bersihkan({
         "metode": PAKET["nama_metode"],
         "parameter": PAKET.get("parameter"),
-        "ambang_bawaan": PAKET.get("ambang_proba", 0.5),
+        "kelas": PAKET.get("kelas"),
+        "ambang_bawaan": ambang_bawaan(),
         "dibuat": PAKET.get("dibuat"),
-        "metrik_uji": m,
+        "metrik_uji": PAKET.get("metrik_uji", {}),
         "perbandingan": PAKET.get("perbandingan", []),
-        "konfigurasi": {k: v for k, v in PAKET["konfigurasi_fitur"].items() if k != "nama_fitur"},
-        "jumlah_fitur": len(PAKET["konfigurasi_fitur"]["nama_fitur"]),
+        # list pasangan [fitur, nilai] agar urutan (terbesar dulu) tidak diubah jsonify
+        "feature_importance": list(PAKET.get("feature_importance", {}).items()),
+        "jumlah_data": PAKET.get("jumlah_data", {}),
+        "konfigurasi": {k: v for k, v in PAKET["konfigurasi_fitur"].items() if k != "urutan_fitur"},
+        "jumlah_fitur": len(PAKET["fitur"]),
+        "pilihan_jendela": PILIHAN_JENDELA,
         "ada_suara": os.path.exists(PATH_SUARA),
+        "contoh": daftar_contoh(),
+        "versi": PAKET.get("versi", {}),
     }))
 
 
@@ -160,8 +178,14 @@ def riwayat():
     return jsonify(list(RIWAYAT_TEGURAN)[:50])
 
 
+@app.get("/health")
+def health():
+    """Dipakai layanan pemantau (mis. UptimeRobot) agar server gratis tidak tertidur."""
+    return jsonify({"status": "ok", "model": PAKET["nama_metode"] if PAKET else None})
+
+
 # ----------------------------------------------------------------------
-# Deteksi real-time dari mikrofon browser
+# Mode Pantau: mikrofon browser
 # ----------------------------------------------------------------------
 @app.post("/api/sesi")
 def buat_sesi():
@@ -191,7 +215,7 @@ def reset_sesi(sid):
 
 @app.post("/api/sesi/<sid>/audio")
 def terima_audio(sid):
-    """Body: PCM int16 little-endian mono. Query: sr = sample rate mic."""
+    """Body: PCM int16 little-endian mono. Query: sr = sample rate mikrofon."""
     s = ambil_sesi(sid)
     sr = angka(request.args.get("sr"), 0, int)
     if not 8000 <= sr <= 192000:
@@ -199,86 +223,122 @@ def terima_audio(sid):
     blok = np.frombuffer(request.get_data(), dtype="<i2").astype(np.float32) / 32768.0
 
     with s.kunci:
-        if s.sr != sr:                      # mic berganti -> mulai ulang buffer
+        if s.sr != sr:                                  # mikrofon berganti -> mulai ulang
             s.sr, s.buffer = sr, np.zeros(0, dtype=np.float32)
-        n_jendela = int(fa.DURASI_CHUNK * sr)
-        s.buffer = np.concatenate([s.buffer, blok])[-n_jendela:]
-        terkumpul = len(s.buffer) / sr
-        if len(s.buffer) < n_jendela:
-            return jsonify({"siap": False, "terkumpul": round(terkumpul, 1),
-                            "dibutuhkan": fa.DURASI_CHUNK})
-        jendela = s.buffer if sr == fa.SR else librosa.resample(s.buffer, orig_sr=sr, target_sr=fa.SR)
+        s.buffer = np.concatenate([s.buffer, blok])[-int(JENDELA_MAKS * sr):]
+        n = int(s.jendela * sr)
+        if len(s.buffer) < n:
+            return jsonify({"siap": False, "terkumpul": round(len(s.buffer) / sr, 1),
+                            "dibutuhkan": s.jendela})
+        target = s.jendela * fa.SR
+        sinyal = fa.resample(s.buffer[-n:], sr)[:target]
+        if len(sinyal) < target:                        # jaga-jaga selisih pembulatan resample
+            sinyal = np.pad(sinyal, (0, target - len(sinyal)))
         t0 = time.perf_counter()
-        prob, status, tegur = s.detektor.nilai(jendela, time.time())
+        prob, status, tegur = s.detektor.nilai(sinyal, time.time())
         waktu_ms = (time.perf_counter() - t0) * 1000
-        jumlah_berisik = int(sum(s.detektor.riwayat))
-        panjang_riwayat = len(s.detektor.riwayat)
+        jml_berisik, jml_riwayat = int(sum(s.detektor.riwayat)), len(s.detektor.riwayat)
+        ambang, jendela = s.detektor.ambang, s.jendela
 
     catat(prob, status, tegur)
-    level_db = float(20 * np.log10(np.sqrt(np.mean(jendela[-fa.SR:] ** 2)) + 1e-10))
+    level_db = float(20 * np.log10(np.sqrt(np.mean(sinyal[-fa.SR:] ** 2)) + 1e-10))
     return jsonify({"siap": True, "prob": round(prob, 4), "status": status, "tegur": bool(tegur),
-                    "ambang": s.detektor.ambang, "level_db": round(level_db, 1),
-                    "riwayat_berisik": jumlah_berisik, "riwayat_isi": panjang_riwayat,
+                    "ambang": ambang, "jendela": jendela, "level_db": round(level_db, 1),
+                    "riwayat_berisik": jml_berisik, "riwayat_isi": jml_riwayat,
                     "waktu_ms": round(waktu_ms, 1)})
 
 
 # ----------------------------------------------------------------------
-# Uji file audio (MP3/WAV) dari halaman web
+# Uji file audio
 # ----------------------------------------------------------------------
+def daftar_contoh():
+    """File audio di folder contoh/ untuk dicoba pengunjung (mis. dosen)."""
+    if not os.path.isdir(PATH_CONTOH):
+        return []
+    return sorted(f for f in os.listdir(PATH_CONTOH) if f.lower().endswith(EKSTENSI_AUDIO))
+
+
+def analisis(sinyal, nama, ambang, jendela):
+    durasi = len(sinyal) / fa.SR
+
+    # (a) satu file -> satu prediksi, PERSIS seperti ekstrak_file + model di notebook
+    fitur_file = fa.ekstrak_sinyal(sinyal)
+    if fitur_file is None:
+        prob_file, label_file, jml_chunk = 0.0, "hening", 0
+    else:
+        prob_file = prob_berisik(PAKET, fitur_file)
+        label_file = "BERISIK" if prob_file >= ambang else "TIDAK BERISIK"
+        jml_chunk = fitur_file["jumlah_chunk"]
+
+    # (b) penilaian tiap chunk 5 detik
+    potongan = []
+    for i, chunk in enumerate(fa.potong_chunk(sinyal)):
+        p, status = nilai_sinyal(PAKET, chunk)
+        if status is None:
+            status = "BERISIK" if p >= ambang else "tenang"
+        potongan.append({"mulai": i * fa.DURASI_CHUNK, "selesai": (i + 1) * fa.DURASI_CHUNK,
+                         "prob": round(p, 4) if status != "hening" else None, "status": status})
+
+    # (c) simulasi sistem: jendela `jendela` detik digeser tiap `langkah` detik + aturan 3 dari 4
+    n = int(jendela * fa.SR)
+    sinyal_sim = np.pad(sinyal, (0, max(0, n - len(sinyal))))
+    langkah = max(1.0, durasi / 300)
+    det = Detektor(PAKET, ambang, 3, 4, 30.0)
+    simulasi = []
+    for awal in range(0, len(sinyal_sim) - n + 1, int(langkah * fa.SR)):
+        t = (awal + n) / fa.SR
+        p, status, tegur = det.nilai(sinyal_sim[awal:awal + n], t)
+        simulasi.append({"t": round(t, 1), "prob": round(p, 4), "tegur": bool(tegur)})
+
+    return {
+        "nama": nama, "durasi": round(durasi, 1), "ambang": ambang, "jendela": jendela,
+        "prob_file": round(prob_file, 4), "keputusan": label_file, "jumlah_chunk": jml_chunk,
+        "potongan": potongan, "simulasi": simulasi,
+        "jumlah_teguran": int(sum(s["tegur"] for s in simulasi)),
+    }
+
+
+def parameter_uji(sumber):
+    return (angka(sumber.get("ambang"), ambang_bawaan(), float, 0.05, 0.99),
+            jendela_valid(sumber.get("jendela")))
+
+
 @app.post("/api/uji-file")
 def uji_file():
     f = request.files.get("file")
     if f is None or not f.filename:
         abort(400, description="Tidak ada file yang diunggah")
     akhiran = os.path.splitext(f.filename)[1].lower() or ".mp3"
-    if akhiran not in (".mp3", ".wav", ".flac", ".ogg", ".m4a"):
+    if akhiran not in EKSTENSI_AUDIO:
         abort(400, description="Format tidak didukung. Gunakan MP3/WAV/FLAC/OGG.")
-    ambang = angka(request.form.get("ambang"), PAKET.get("ambang_proba", 0.5), float, 0.05, 0.99)
-
+    ambang, jendela = parameter_uji(request.form)
     fd, tmp = tempfile.mkstemp(suffix=akhiran)
     os.close(fd)
     try:
         f.save(tmp)
         try:
-            y = fa.muat_audio(tmp)
+            sinyal = fa.muat_audio(tmp)
         except Exception as e:
             abort(400, description=f"File tidak bisa dibaca: {e}")
     finally:
         os.remove(tmp)
+    return jsonify(bersihkan(analisis(sinyal, f.filename, ambang, jendela)))
 
-    durasi = len(y) / fa.SR
-    model = PAKET["model"]
 
-    # (a) per potongan 5 detik - sama seperti data uji di notebook
-    chunks = fa.potong_chunk(y)
-    potongan = []
-    if chunks:
-        X = np.vstack([fa.ekstrak_fitur(c) for c in chunks])
-        for i, p in enumerate(model.predict_proba(X)[:, 1]):
-            potongan.append({"mulai": i * fa.DURASI_CHUNK,
-                             "selesai": min((i + 1) * fa.DURASI_CHUNK, durasi),
-                             "prob": round(float(p), 4),
-                             "status": "BERISIK" if p >= ambang else "tenang"})
+@app.post("/api/uji-contoh/<nama>")
+def uji_contoh(nama):
+    if nama not in daftar_contoh():
+        abort(404, description="File contoh tidak ditemukan")
+    ambang, jendela = parameter_uji(request.get_json(silent=True) or {})
+    sinyal = fa.muat_audio(os.path.join(PATH_CONTOH, nama))
+    return jsonify(bersihkan(analisis(sinyal, nama, ambang, jendela)))
 
-    # (b) simulasi sistem: jendela 5 detik digeser tiap `langkah` detik + aturan 3 dari 4
-    n = int(fa.DURASI_CHUNK * fa.SR)
-    y_sim = np.pad(y, (0, max(0, n - len(y))))
-    langkah = max(1.0, durasi / 300)                  # maksimal +-300 titik
-    det = Detektor(PAKET, ambang, 3, 4, 30.0)
-    simulasi = []
-    for awal in range(0, len(y_sim) - n + 1, int(langkah * fa.SR)):
-        t = (awal + n) / fa.SR
-        p, status, tegur = det.nilai(y_sim[awal:awal + n], t)
-        simulasi.append({"t": round(t, 1), "prob": round(p, 4), "tegur": bool(tegur)})
 
-    persen = 100 * np.mean([c["status"] == "BERISIK" for c in potongan]) if potongan else 0.0
-    return jsonify(bersihkan({
-        "nama": f.filename, "durasi": round(durasi, 1), "ambang": ambang,
-        "potongan": potongan, "simulasi": simulasi,
-        "persen_berisik": round(float(persen), 1),
-        "keputusan": "BERISIK" if persen >= 50 else "TIDAK BERISIK",
-        "jumlah_teguran": int(sum(s["tegur"] for s in simulasi)),
-    }))
+@app.get("/contoh/<nama>")
+def unduh_contoh(nama):
+    if nama not in daftar_contoh():
+        abort(404)
+    return send_file(os.path.join(PATH_CONTOH, nama), max_age=3600)
 
 
 @app.errorhandler(400)
@@ -296,18 +356,28 @@ def muat(path_model=PATH_MODEL):
     global PAKET, PENCATAT
     if not os.path.exists(path_model):
         raise SystemExit(f"[ERROR] Model tidak ditemukan: {path_model}\n"
-                         "Jalankan notebook sampai tahap Deployment terlebih dahulu.")
+                         "Jalankan notebook sampai Bab 9 (Deployment) terlebih dahulu.")
     PAKET = muat_model(path_model)
     PENCATAT = Pencatat(PATH_LOG)
-    print(f"Model dimuat: {PAKET['nama_metode']} | ambang {PAKET.get('ambang_proba', 0.5)}")
+    print(f"Model dimuat: {PAKET['nama_metode']} | kelas {PAKET.get('kelas')} | ambang {ambang_bawaan()}")
 
+
+if __name__ != "__main__":
+    # Dijalankan lewat gunicorn (hosting online): muat model saat modul diimpor.
+    # Pakai SATU worker (--workers 1 --threads 8) karena sesi mikrofon disimpan di memori.
+    muat(os.environ.get("MODEL_PATH", PATH_MODEL))
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Web deteksi keramaian lab")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=5000)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 5000)))
     ap.add_argument("--model", default=PATH_MODEL)
+    ap.add_argument("--dev", action="store_true",
+                    help="mode pengembangan: server restart otomatis saat file .py/.html diubah")
     args = ap.parse_args()
     muat(args.model)
+    if args.dev:
+        app.config["TEMPLATES_AUTO_RELOAD"] = True
+        app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     print(f"Buka di browser: http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}")
-    app.run(host=args.host, port=args.port, threaded=True, debug=False)
+    app.run(host=args.host, port=args.port, threaded=True, debug=args.dev)

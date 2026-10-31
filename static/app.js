@@ -1,5 +1,5 @@
 // =====================================================================
-// Penjaga Tenang Lab - logika halaman
+// Penjaga Tenang Lab - logika halaman (hanya mode Pantau)
 // Mikrofon (AudioWorklet) -> kirim PCM 16-bit tiap 1 detik ke /api/sesi/<id>/audio
 // -> server menilai jendela 5 detik -> tampilkan status -> putar teguran bila perlu.
 // =====================================================================
@@ -90,39 +90,15 @@ const jsonPost = (obj) => ({ method: "POST", headers: { "Content-Type": "applica
 // ---------------------------------------------------------------------
 // Info model
 // ---------------------------------------------------------------------
-const fmt = (x, d = 4) => (typeof x === "number" ? x.toFixed(d) : (x ?? "–"));
 async function muatInfo() {
   try {
     S.info = await api("/api/info");
   } catch (e) {
-    $("lencanaModel").textContent = "Model gagal dimuat";
+    pesan("pesanMic", "Model gagal dimuat: " + e.message, true);
     return;
   }
-  const i = S.info, m = i.metrik_uji || {};
-  $("lencanaModel").innerHTML = `Model: <b>${i.metode}</b> · F1 ${fmt(m["F1-macro"], 3)}`;
-  if (!muatPengaturanTersimpan()) $("ambang").value = i.ambang_bawaan;
+  if (!muatPengaturanTersimpan()) $("ambang").value = S.info.ambang_bawaan;
   tampilkanNilai();
-
-  const isi = [
-    ["Metode", i.metode],
-    ["Parameter", JSON.stringify(i.parameter)],
-    ["Ambang bawaan", i.ambang_bawaan],
-    ["Dilatih pada", i.dibuat],
-    ["F1-macro (uji)", fmt(m["F1-macro"])],
-    ["Precision berisik", fmt(m["Precision (berisik)"])],
-    ["Recall berisik", fmt(m["Recall (berisik)"])],
-    ["ROC-AUC", fmt(m["ROC-AUC"])],
-    ["Suara teguran", i.ada_suara ? "suara/peringatan.wav" : "Bawaan browser (desis + suara sintetis)"],
-  ];
-  $("infoModel").innerHTML = isi.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
-  $("jmlFitur").textContent = i.jumlah_fitur;
-  $("infoKonfig").innerHTML = Object.entries(i.konfigurasi).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
-
-  const kol = ["Metode", "Accuracy", "Precision (berisik)", "Recall (berisik)", "F1-macro", "ROC-AUC", "F1 CV (mean)", "Waktu prediksi/chunk (ms)"];
-  const baris = (i.perbandingan || []).map((r) =>
-    `<tr class="${r.Metode === i.metode ? "terbaik" : ""}">` +
-    kol.map((k) => `<td>${k === "Metode" ? r[k] + (r[k] === i.metode ? " ★" : "") : fmt(r[k], k.startsWith("Waktu") ? 3 : 4)}</td>`).join("") + "</tr>");
-  $("tabelBanding").innerHTML = `<thead><tr>${kol.map((k) => `<th>${k}</th>`).join("")}</tr></thead><tbody>${baris.join("")}</tbody>`;
 }
 
 async function muatRiwayatServer() {
@@ -263,6 +239,7 @@ function tanganiHasil(r) {
       : "Suasana lab kondusif");
   $("angkaProb").textContent = r.prob.toFixed(2);
   $("isiMeter").style.width = (r.prob * 100) + "%";
+  $("kartuStatus").style.setProperty("--p", r.prob * 100);      // isi cincin gauge
   S.riwayat.push({ t: Date.now(), prob: r.prob, tegur: r.tegur });
   const batas = Date.now() - 180000;
   while (S.riwayat.length && S.riwayat[0].t < batas) S.riwayat.shift();
@@ -276,7 +253,10 @@ function setStatus(kunci, kata, ket) {
   $("kartuStatus").dataset.status = kunci;
   $("kataStatus").textContent = kata;
   $("ketStatus").textContent = ket;
-  if (kunci === "siaga" || kunci === "kumpul") { $("angkaProb").textContent = "–"; $("isiMeter").style.width = "0"; }
+  if (kunci === "siaga" || kunci === "kumpul") {
+    $("angkaProb").textContent = "–"; $("isiMeter").style.width = "0";
+    $("kartuStatus").style.setProperty("--p", 0);
+  }
 }
 function gambarTitik(nilai) {
   const n = parseInt($("riwayat").value, 10), el = $("titikRiwayat");
@@ -434,58 +414,9 @@ function gambarGrafik() {
 }
 
 // ---------------------------------------------------------------------
-// Uji file
-// ---------------------------------------------------------------------
-let hasilUjiTerakhir = null;
-async function ujiFile(file) {
-  if (!file) return;
-  $("teksZona").innerHTML = `<b>${file.name}</b> · memproses…`;
-  pesan("pesanUji", "Mengekstraksi fitur dan memprediksi… (file MP3 panjang bisa butuh beberapa detik)");
-  const fd = new FormData(); fd.append("file", file); fd.append("ambang", bacaPengaturan().ambang);
-  try {
-    const r = await api("/api/uji-file", { method: "POST", body: fd });
-    hasilUjiTerakhir = r;
-    $("hasilUji").hidden = false;
-    $("ujKeputusan").textContent = r.keputusan;
-    $("ujKeputusan").style.color = r.keputusan === "BERISIK" ? css("--berisik") : css("--tenang");
-    $("ujPersen").textContent = r.persen_berisik + "%";
-    $("ujDurasi").textContent = mmss(r.durasi);
-    $("ujTeguran").textContent = r.jumlah_teguran;
-    $("tabelUji").querySelector("tbody").innerHTML = r.potongan.map((c) =>
-      `<tr><td>${mmss(c.mulai)} – ${mmss(c.selesai)}</td>` +
-      `<td><span class="batang"><i style="width:${c.prob * 100}%"></i></span>${c.prob.toFixed(3)}</td>` +
-      `<td><span class="pil ${c.status}">${c.status}</span></td></tr>`).join("");
-    gambarGrafikUji();
-    pesan("pesanUji", `Selesai · ambang ${r.ambang.toFixed(2)} · ${r.potongan.length} potongan`);
-    $("teksZona").innerHTML = `<b>${file.name}</b> · pilih file lain`;
-  } catch (e) {
-    pesan("pesanUji", "Gagal: " + e.message, true);
-    $("teksZona").innerHTML = `<b>Pilih file</b> atau seret ke sini`;
-  }
-}
-function gambarGrafikUji() {
-  const r = hasilUjiTerakhir, cv = $("grafikUji"); if (!r || !cv.clientWidth) return;
-  const { g, w, h } = siapkanCanvas(cv), kiri = 28, bawah = 18;
-  gambarSumbu(g, w, h, kiri, bawah, r.ambang);
-  const akhir = Math.max(r.durasi, 5);
-  g.fillStyle = css("--redup");
-  for (let i = 0; i <= 4; i++) {
-    const t = akhir * i / 4, x = kiri + (t / akhir) * (w - kiri);
-    g.textAlign = i === 0 ? "left" : i === 4 ? "right" : "center"; g.fillText(mmss(t), x, h - 3);
-  }
-  g.textAlign = "left";
-  gambarSeri(g, r.simulasi, kiri, w, h, bawah, 0, akhir);
-}
-
-// ---------------------------------------------------------------------
 // Inisialisasi
 // ---------------------------------------------------------------------
 function pasang() {
-  document.querySelectorAll(".tab button").forEach((b) => b.addEventListener("click", () => {
-    document.querySelectorAll(".tab button").forEach((x) => x.classList.toggle("aktif", x === b));
-    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("aktif", p.id === "tab-" + b.dataset.tab));
-    gambarGrafik(); gambarGrafikUji();
-  }));
   $("tblMulai").addEventListener("click", () => (S.aktif ? berhenti() : mulai()));
   $("tblTes").addEventListener("click", async () => {
     $("tblTes").disabled = true; $("tirai").hidden = false;
@@ -497,13 +428,7 @@ function pasang() {
     pengaturanBerubah();
     if (S.aktif) { await berhenti(true); await mulai(); }
   });
-  $("inputFile").addEventListener("change", (e) => ujiFile(e.target.files[0]));
-  const zona = $("zona");
-  zona.addEventListener("dragover", (e) => { e.preventDefault(); zona.classList.add("seret"); });
-  zona.addEventListener("dragleave", () => zona.classList.remove("seret"));
-  zona.addEventListener("drop", (e) => { e.preventDefault(); zona.classList.remove("seret"); ujiFile(e.dataTransfer.files[0]); });
-  window.addEventListener("resize", () => { gambarGrafik(); gambarGrafikUji(); });
-  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { gambarGrafik(); gambarGrafikUji(); });
+  window.addEventListener("resize", gambarGrafik);
   if ("speechSynthesis" in window) speechSynthesis.getVoices();   // memicu pemuatan daftar suara
   navigator.mediaDevices?.addEventListener?.("devicechange", daftarMic);
 }

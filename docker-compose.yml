@@ -1,0 +1,15 @@
+services:
+  deteksi-keramaian:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: deteksi-keramaian:latest
+    container_name: deteksi-keramaian-app
+    restart: unless-stopped
+    ports:
+      - "8012:5000"
+    environment:
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./hasil:/app/hasil
+      - ./suara:/app/suara:ro

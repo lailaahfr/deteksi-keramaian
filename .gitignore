@@ -1,0 +1,26 @@
+# --- Data audio: terlalu besar untuk GitHub, bagikan lewat Google Drive ---
+data/**/*.mp3
+data/**/*.wav
+data/**/*.flac
+data/**/*.ogg
+data/**/*.m4a
+!data/**/.gitkeep
+
+# --- Hasil yang bisa dibuat ulang dari notebook ---
+hasil/*.csv
+hasil/*.png
+!hasil/.gitkeep
+
+# --- Python & Jupyter ---
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.venv/
+env/
+
+# --- Sistem operasi / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

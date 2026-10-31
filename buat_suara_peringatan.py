@@ -17,7 +17,7 @@ import tempfile
 import numpy as np
 import soundfile as sf
 
-from deteksi_lab import suara_ssst_sintetis
+from detektor import suara_ssst_sintetis
 
 LOKASI = os.path.dirname(os.path.abspath(__file__))
 TUJUAN = os.path.join(LOKASI, "suara", "peringatan.wav")

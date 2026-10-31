@@ -7,156 +7,111 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header class="atas">
+  <div class="latar" aria-hidden="true"></div>
+
+  <header class="bar">
     <div class="merek">
       <span class="logo" aria-hidden="true">
-        <svg viewBox="0 0 24 24"><path d="M9 4v16M5 8v8M13 6v12M17 9v6M21 11v2" /></svg>
+        <svg viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M22 12h-1" /></svg>
       </span>
       <div>
         <h1>Penjaga Tenang Lab</h1>
-        <p class="sub">Deteksi keramaian ruang lab berbasis audio</p>
+        <p class="sub">Pemantau keramaian lab lewat suara</p>
       </div>
     </div>
-    <div class="lencana" id="lencanaModel">memuat model…</div>
   </header>
-
-  <nav class="tab" role="tablist">
-    <button class="aktif" data-tab="pantau" role="tab">Pantau</button>
-    <button data-tab="uji" role="tab">Uji File Audio</button>
-    <button data-tab="model" role="tab">Model</button>
-  </nav>
 
   <main>
     <!-- ============ PANTAU ============ -->
     <section id="tab-pantau" class="panel aktif">
-      <div class="grid-pantau">
-        <div class="kartu kartu-status" id="kartuStatus" data-status="siaga">
+      <input type="checkbox" id="bukaLaci" class="sembunyi" aria-label="Buka pengaturan">
+
+      <!-- panggung: tiga kolom, gauge di tengah -->
+      <div class="kartu-status" id="kartuStatus" data-status="siaga">
+        <div class="panggung">
+          <div class="sisi sisi-kiri">
+            <div class="stat"><b id="stDurasi">0:00</b><span>lama memantau</span></div>
+            <div class="stat"><b id="stPersen">0%</b><span>waktu berisik</span></div>
+            <div class="stat"><b id="stTeguran">0</b><span>teguran</span></div>
+          </div>
+
           <div class="cincin">
-            <div class="kata" id="kataStatus">SIAGA</div>
-            <div class="ket" id="ketStatus">Tekan Mulai untuk mendengarkan lab</div>
+            <div class="gauge">
+              <div class="gauge-isi">
+                <div class="kata" id="kataStatus">SIAGA</div>
+                <div class="ket" id="ketStatus">Tekan Mulai untuk mendengarkan lab</div>
+              </div>
+            </div>
           </div>
 
-          <div class="meter-wrap">
-            <div class="meter-label"><span>Probabilitas berisik</span><b id="angkaProb">–</b></div>
-            <div class="meter"><div class="isi" id="isiMeter"></div><div class="garis-ambang" id="garisAmbang"></div></div>
-          </div>
-
-          <div class="baris-kecil">
-            <div>
+          <div class="sisi sisi-kanan">
+            <div class="meter-wrap">
+              <div class="meter-label"><span>Probabilitas berisik</span><b id="angkaProb">–</b></div>
+              <div class="meter"><div class="isi" id="isiMeter"></div><div class="garis-ambang" id="garisAmbang"></div></div>
+            </div>
+            <div class="blok">
               <span class="lbl">Penilaian terakhir</span>
               <div class="titik" id="titikRiwayat"></div>
             </div>
-            <div>
+            <div class="blok">
               <span class="lbl">Level mikrofon</span>
               <div class="level"><div class="level-isi" id="levelIsi"></div></div>
               <span class="mini" id="levelAngka">– dBFS</span>
             </div>
           </div>
-
-          <div class="tombol-baris">
-            <button class="tbl utama" id="tblMulai">Mulai mendengarkan</button>
-            <button class="tbl" id="tblTes">Tes suara teguran</button>
-          </div>
-          <p class="pesan" id="pesanMic" role="status"></p>
         </div>
-
-        <div class="kolom-kanan">
-          <div class="kartu">
-            <h2>Pengaturan</h2>
-            <label class="isian">Mikrofon
-              <select id="pilihMic"><option value="">Default sistem</option></select>
-            </label>
-            <label class="isian">Ambang berisik <b id="nilaiAmbang">0.50</b>
-              <input type="range" id="ambang" min="0.3" max="0.95" step="0.01" value="0.5">
-              <small>Naikkan jika teguran terlalu sering muncul.</small>
-            </label>
-            <div class="dua">
-              <label class="isian">Tegur jika
-                <select id="konfirmasi"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-              </label>
-              <label class="isian">dari penilaian
-                <select id="riwayat"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
-              </label>
-            </div>
-            <label class="isian">Jeda antar teguran <b id="nilaiCooldown">30 dtk</b>
-              <input type="range" id="cooldown" min="5" max="180" step="5" value="30">
-            </label>
-            <label class="isian">Volume teguran <b id="nilaiVolume">100%</b>
-              <input type="range" id="volume" min="0" max="1.5" step="0.05" value="1">
-            </label>
-          </div>
-
-          <div class="kartu">
-            <h2>Statistik sesi</h2>
-            <div class="statistik">
-              <div><b id="stDurasi">0:00</b><span>lama memantau</span></div>
-              <div><b id="stPersen">0%</b><span>waktu berisik</span></div>
-              <div><b id="stTeguran">0</b><span>teguran</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="kartu lebar">
-          <div class="kepala-kartu">
-            <h2>Riwayat 3 menit terakhir</h2>
-            <span class="legenda"><i class="lg-garis"></i>probabilitas <i class="lg-putus"></i>ambang <i class="lg-titik"></i>teguran</span>
-          </div>
-          <canvas id="grafik" height="180"></canvas>
-        </div>
-
-        <div class="kartu lebar">
-          <h2>Teguran terakhir</h2>
-          <ul class="daftar" id="daftarTeguran"><li class="kosong">Belum ada teguran.</li></ul>
-        </div>
+        <p class="pesan" id="pesanMic" role="status"></p>
       </div>
-    </section>
 
-    <!-- ============ UJI FILE ============ -->
-    <section id="tab-uji" class="panel">
       <div class="kartu">
-        <h2>Uji file rekaman</h2>
-        <p class="redup">Unggah rekaman MP3/WAV untuk melihat bagaimana model menilai tiap potongan 5 detik,
-          dan kapan sistem akan menegur (aturan yang sama dengan mode pantau).</p>
-        <label class="zona" id="zona">
-          <input type="file" id="inputFile" accept=".mp3,.wav,.flac,.ogg,.m4a,audio/*">
-          <span id="teksZona"><b>Pilih file</b> atau seret ke sini</span>
+        <div class="kepala-kartu">
+          <h2>Riwayat 3 menit terakhir</h2>
+          <span class="legenda"><i class="lg-garis"></i>probabilitas <i class="lg-putus"></i>ambang <i class="lg-titik"></i>teguran</span>
+        </div>
+        <canvas id="grafik" height="180"></canvas>
+      </div>
+
+      <div class="kartu">
+        <h2>Teguran terakhir</h2>
+        <ul class="daftar" id="daftarTeguran"><li class="kosong">Belum ada teguran.</li></ul>
+      </div>
+
+      <!-- dock melayang -->
+      <div class="dock">
+        <button class="tbl" id="tblTes">Tes suara</button>
+        <button class="tbl utama" id="tblMulai">Mulai mendengarkan</button>
+        <label class="tbl" for="bukaLaci" role="button" tabindex="0">Pengaturan</label>
+      </div>
+
+      <!-- laci pengaturan -->
+      <label class="tabir" for="bukaLaci"></label>
+      <aside class="laci">
+        <div class="kepala-kartu">
+          <h2>Pengaturan</h2>
+          <label for="bukaLaci" class="tutup" role="button" tabindex="0">Tutup ✕</label>
+        </div>
+        <label class="isian">Mikrofon
+          <select id="pilihMic"><option value="">Default sistem</option></select>
         </label>
-        <p class="pesan" id="pesanUji"></p>
-      </div>
-      <div id="hasilUji" hidden>
-        <div class="statistik besar kartu">
-          <div><b id="ujKeputusan">–</b><span>keputusan file</span></div>
-          <div><b id="ujPersen">–</b><span>potongan berisik</span></div>
-          <div><b id="ujDurasi">–</b><span>durasi</span></div>
-          <div><b id="ujTeguran">–</b><span>teguran (simulasi)</span></div>
+        <label class="isian">Ambang berisik <b id="nilaiAmbang">0.50</b>
+          <input type="range" id="ambang" min="0.3" max="0.95" step="0.01" value="0.5">
+          <small>Naikkan jika teguran terlalu sering muncul.</small>
+        </label>
+        <div class="dua">
+          <label class="isian">Tegur jika
+            <select id="konfirmasi"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label class="isian">dari penilaian
+            <select id="riwayat"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
+          </label>
         </div>
-        <div class="kartu">
-          <h2>Simulasi sistem sepanjang rekaman</h2>
-          <canvas id="grafikUji" height="180"></canvas>
-        </div>
-        <div class="kartu">
-          <h2>Penilaian per potongan 5 detik</h2>
-          <div class="tabel-wrap"><table id="tabelUji"><thead><tr><th>Waktu</th><th>Probabilitas berisik</th><th>Status</th></tr></thead><tbody></tbody></table></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ MODEL ============ -->
-    <section id="tab-model" class="panel">
-      <div class="kartu">
-        <h2>Model yang dipakai</h2>
-        <dl class="info" id="infoModel"></dl>
-      </div>
-      <div class="kartu">
-        <h2>Perbandingan metode (data uji)</h2>
-        <div class="tabel-wrap"><table id="tabelBanding"></table></div>
-      </div>
-      <div class="kartu">
-        <h2>Pipeline fitur</h2>
-        <p class="redup">Mikrofon → resample 16 kHz → jendela 5 detik → buang frame hening → RMS, Spectral Centroid,
-          ZCR, 13 MFCC → mean &amp; std (<span id="jmlFitur">32</span> fitur) → model → aturan konfirmasi + jeda → teguran.</p>
-        <dl class="info" id="infoKonfig"></dl>
-      </div>
+        <label class="isian">Jeda antar teguran <b id="nilaiCooldown">30 dtk</b>
+          <input type="range" id="cooldown" min="5" max="180" step="5" value="30">
+        </label>
+        <label class="isian">Volume teguran <b id="nilaiVolume">100%</b>
+          <input type="range" id="volume" min="0" max="1.5" step="0.05" value="1">
+        </label>
+      </aside>
     </section>
   </main>
 

@@ -1,0 +1,6 @@
+# Tambahan untuk menjalankan notebook & skrip opsional di laptop (tidak dipakai Docker).
+# Install: pip install -r requirements.txt -r requirements-notebook.txt
+matplotlib
+jupyter
+sounddevice         # versi CLI deteksi_lab.py & merekam suara teguran sendiri
+gTTS                # membuat suara "jangan ramai" lewat TTS (butuh internet)

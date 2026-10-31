@@ -1,12 +1,9 @@
+# Dependensi untuk menjalankan sistem web (dipakai juga oleh Dockerfile).
+# Versi scikit-learn & librosa disamakan dengan saat model dilatih.
+flask>=2.2
 numpy
 pandas
-matplotlib
-librosa>=0.10
-soundfile>=0.12.1   # membaca MP3 (libsndfile >= 1.1)
-scikit-learn>=1.1
+librosa==1.0.0
+soundfile>=0.12.1
+scikit-learn==1.9.0
 joblib
-jupyter
-flask>=2.2          # sistem web
-# opsional:
-sounddevice         # versi CLI deteksi_lab.py & merekam suara teguran sendiri
-gTTS                # membuat suara "jangan ramai" lewat TTS (butuh internet)

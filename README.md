@@ -13,11 +13,35 @@ lalu model terbaik dipakai **sistem web** di lab yang memutar teguran suara saat
 | `deteksi_lab.py` | Logika keputusan (dipakai `app.py`) + versi terminal/CLI cadangan |
 | `buat_suara_peringatan.py` | Membuat `suara/peringatan.wav` (TTS atau rekam suara sendiri) |
 | `data/berisik/`, `data/non_berisik/` | Taruh 100 + 100 file audio di sini (MP3 didukung, juga wav/flac/ogg) |
+| `Dockerfile`, `docker-compose.yml` | Deployment dengan Docker (port 8012) |
 | `model/`, `hasil/`, `suara/` | Diisi otomatis: model, grafik/CSV evaluasi & log deteksi, file suara |
 
-## Langkah
+## Menjalankan dengan Docker (Kelompok 12, port 8012)
+Syarat: Docker Desktop sudah terpasang dan berjalan.
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/lailaahfr/deteksi-keramaian.git
+cd deteksi-keramaian
+docker compose up -d --build
+```
+Buka **http://localhost:8012**, lalu tab Pantau, lalu "Mulai mendengarkan".
+
+| Perintah | Fungsi |
+|---|---|
+| `docker compose up -d --build` | Build image dan jalankan container di background |
+| `docker compose ps` | Cek status container |
+| `docker compose logs -f` | Lihat log aplikasi |
+| `docker compose down` | Hentikan container |
+
+Tanpa Compose: `docker build -t deteksi-keramaian .` lalu `docker run -p 8012:5000 deteksi-keramaian`.
+
+File deployment di root proyek:
+- `Dockerfile` berisi resep image dan cara menjalankan aplikasi (`python app.py --host 0.0.0.0 --port 5000`).
+- `docker-compose.yml` memetakan port 8012 (laptop) ke 5000 (container). Log deteksi tersimpan di `hasil/`.
+- `requirements.txt` berisi dependensi sistem web. Dependensi notebook ada di `requirements-notebook.txt`.
+
+## Langkah (tanpa Docker)
+```bash
+pip install -r requirements.txt -r requirements-notebook.txt
 
 # 1. Training & evaluasi: buka notebook, Run All
 jupyter notebook 01_klasifikasi_keramaian_lab.ipynb
