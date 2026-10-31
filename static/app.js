@@ -342,10 +342,17 @@ async function putarTeguran() {
   if (sementara) ctx.close();
 }
 
+// Notifikasi teguran: kartu kecil di pojok + kartu status berdenyut.
+// Tidak menutupi halaman, sehingga gauge dan grafik tetap terlihat.
+function tampilTeguran(tampil) {
+  $("tirai").hidden = !tampil;
+  $("kartuStatus").classList.toggle("menegur", tampil);
+}
+
 async function tegur(prob) {
   S.memutar = true;
   S.teguran++; perbaruiStatistik();
-  $("tirai").hidden = false;
+  tampilTeguran(true);
   const li = document.createElement("li");
   li.innerHTML = `${new Date().toLocaleString("id-ID")} <span>prob ${prob.toFixed(2)}</span>`;
   const daftar = $("daftarTeguran");
@@ -353,7 +360,7 @@ async function tegur(prob) {
   daftar.prepend(li);
   try { await putarTeguran(); } catch (_) {}
   await new Promise((r) => setTimeout(r, 600));
-  $("tirai").hidden = true;
+  tampilTeguran(false);
   // buang audio yang terekam selama teguran agar sistem tidak mendeteksi suaranya sendiri
   S.antre = []; S.jmlAntre = 0;
   try { if (S.sesi) await api(`/api/sesi/${S.sesi}/reset`, { method: "POST" }); } catch (_) {}
@@ -419,10 +426,10 @@ function gambarGrafik() {
 function pasang() {
   $("tblMulai").addEventListener("click", () => (S.aktif ? berhenti() : mulai()));
   $("tblTes").addEventListener("click", async () => {
-    $("tblTes").disabled = true; $("tirai").hidden = false;
-    try { await putarTeguran(); } finally { $("tirai").hidden = true; $("tblTes").disabled = false; }
+    $("tblTes").disabled = true; tampilTeguran(true);
+    try { await putarTeguran(); } finally { tampilTeguran(false); $("tblTes").disabled = false; }
   });
-  $("tirai").addEventListener("click", () => { $("tirai").hidden = true; });
+  $("tirai").addEventListener("click", () => tampilTeguran(false));
   for (const id of ["ambang", "konfirmasi", "riwayat", "cooldown", "volume"]) $(id).addEventListener("input", pengaturanBerubah);
   $("pilihMic").addEventListener("change", async () => {
     pengaturanBerubah();

@@ -30,9 +30,9 @@
       <div class="kartu-status" id="kartuStatus" data-status="siaga">
         <div class="panggung">
           <div class="sisi sisi-kiri">
-            <div class="stat"><b id="stDurasi">0:00</b><span>lama memantau</span></div>
-            <div class="stat"><b id="stPersen">0%</b><span>waktu berisik</span></div>
-            <div class="stat"><b id="stTeguran">0</b><span>teguran</span></div>
+            <div class="stat stat-biru"><b id="stDurasi">0:00</b><span>lama memantau</span></div>
+            <div class="stat stat-oranye"><b id="stPersen">0%</b><span>waktu berisik</span></div>
+            <div class="stat stat-merah"><b id="stTeguran">0</b><span>teguran</span></div>
           </div>
 
           <div class="cincin">
@@ -115,7 +115,11 @@
     </section>
   </main>
 
-  <div class="tirai" id="tirai" hidden>
+  <!-- notifikasi teguran: kecil di pojok, tidak menutupi grafik -->
+  <div class="tirai" id="tirai" role="alert" hidden>
+    <span class="tirai-ikon" aria-hidden="true"><i></i>
+      <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+    </span>
     <div class="tirai-isi">
       <div class="tirai-sst">sssttt…</div>
       <div class="tirai-teks">jangan ramai</div>
