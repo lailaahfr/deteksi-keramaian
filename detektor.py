@@ -89,16 +89,3 @@ class Pencatat:
     def tulis(self, prob, status, teguran):
         self.w.writerow([datetime.now().isoformat(timespec="seconds"), f"{prob:.3f}", status, int(teguran)])
         self.f.flush()
-
-
-def suara_ssst_sintetis(sr=fa.SR, durasi=1.6):
-    """Desis 'sssttt' dari noise tersaring (dipakai buat_suara_peringatan.py)."""
-    rng = np.random.default_rng(0)
-    n = int(sr * durasi)
-    spek = np.fft.rfft(rng.normal(0, 1, n))
-    frek = np.fft.rfftfreq(n, 1 / sr)
-    spek[(frek < 3500) | (frek > 7500)] = 0
-    desis = np.fft.irfft(spek, n)
-    t = np.linspace(0, 1, n)
-    desis *= np.minimum(1, t / 0.08) * np.minimum(1, (1 - t) / 0.25)
-    return (0.6 * desis / (np.abs(desis).max() + 1e-9)).astype(np.float32), sr

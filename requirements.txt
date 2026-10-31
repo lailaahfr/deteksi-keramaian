@@ -1,5 +1,5 @@
-# Dependensi untuk menjalankan sistem web (dipakai juga oleh Dockerfile).
-# Versi scikit-learn & librosa disamakan dengan saat model dilatih.
+# pip install -r requirements.txt
+
 flask>=2.2
 numpy
 pandas
@@ -7,3 +7,7 @@ librosa==1.0.0
 soundfile>=0.12.1
 scikit-learn==1.9.0
 joblib
+matplotlib
+jupyter
+sounddevice
+gTTS                
