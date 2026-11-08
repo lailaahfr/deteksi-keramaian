@@ -159,7 +159,7 @@ async function mulai() {
 
     const label = S.stream.getAudioTracks()[0]?.label || "mikrofon";
     pesan("pesanMic", `Mendengarkan: ${label} (${S.ctx.sampleRate} Hz)`);
-    setStatus("kumpul", "MENDENGAR", "Mengumpulkan 5 detik audio pertama…");
+    setStatus("kumpul", "MENDENGAR", "Mendengarkan… penilaian pertama muncul dalam 1 detik");
     tbl.textContent = "Berhenti"; tbl.classList.add("berhenti");
   } catch (e) {
     let teks = e.message;
@@ -234,9 +234,10 @@ function tanganiHasil(r) {
   S.nilaiTotal++; if (r.status === "BERISIK") S.nilaiBerisik++;
   const berisik = r.status === "BERISIK";
   setStatus(berisik ? "berisik" : "tenang", berisik ? "BERISIK" : "TENANG",
-    r.tegur ? "Lab ramai, teguran diputar"
+    (r.tegur ? "Lab ramai, teguran diputar"
       : berisik ? `${r.riwayat_berisik} dari ${r.riwayat_isi} penilaian terakhir berisik`
-      : "Suasana lab kondusif");
+      : "Suasana lab kondusif")
+    + (r.awal ? ` · penilaian awal (${r.terkumpul}/${r.jendela} dtk)` : ""));
   $("angkaProb").textContent = r.prob.toFixed(2);
   $("isiMeter").style.width = (r.prob * 100) + "%";
   $("kartuStatus").style.setProperty("--p", r.prob * 100);      // isi cincin gauge
@@ -365,7 +366,7 @@ async function tegur(prob) {
   S.antre = []; S.jmlAntre = 0;
   try { if (S.sesi) await api(`/api/sesi/${S.sesi}/reset`, { method: "POST" }); } catch (_) {}
   S.memutar = false;
-  if (S.aktif) setStatus("kumpul", "MENDENGAR", "Mengumpulkan ulang 5 detik audio…");
+  if (S.aktif) setStatus("kumpul", "MENDENGAR", "Mendengarkan kembali…");
 }
 
 // ---------------------------------------------------------------------

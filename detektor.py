@@ -1,9 +1,3 @@
-"""
-detektor.py - memuat model dari notebook dan memutuskan kapan menegur
-=====================================================================
-Dipakai oleh app.py (sistem web).
-"""
-
 import collections
 import csv
 import os
@@ -38,12 +32,13 @@ def prob_berisik(paket, fitur):
     return float(paket["model"].predict_proba(X)[0, paket["_idx_berisik"]])
 
 
-def nilai_sinyal(paket, sinyal):
+def nilai_sinyal(paket, sinyal, awal=False):
     """Sinyal 16 kHz -> (prob_berisik, status). status: 'BERISIK' / 'tenang' / 'hening'.
 
     'hening' = semua chunk dibuang oleh aturan buang hening (dianggap tidak berisik).
     """
-    fitur = fa.ekstrak_sinyal(sinyal)
+    # awal=True: audio belum genap 5 detik -> seluruh sinyal dinilai sebagai satu potongan
+    fitur = fa.ekstrak_awal(sinyal) if awal else fa.ekstrak_sinyal(sinyal)
     if fitur is None:
         return 0.0, "hening"
     return prob_berisik(paket, fitur), None
@@ -61,9 +56,9 @@ class Detektor:
         self.cooldown = cooldown
         self.terakhir_tegur = -1e9
 
-    def nilai(self, sinyal, sekarang):
+    def nilai(self, sinyal, sekarang, awal=False):
         """Mengembalikan (prob_berisik, status, harus_tegur)."""
-        prob, status = nilai_sinyal(self.paket, sinyal)
+        prob, status = nilai_sinyal(self.paket, sinyal, awal)
         berisik = status != "hening" and prob >= self.ambang
         if status is None:
             status = "BERISIK" if berisik else "tenang"

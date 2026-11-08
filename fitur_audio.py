@@ -1,21 +1,3 @@
-"""
-fitur_audio.py
-==============
-Pipeline pra-pemrosesan dan ekstraksi fitur yang SAMA PERSIS dengan notebook
-`klasifikasi-audio.ipynb` (Bab 3-5). Dipakai oleh sistem web agar fitur saat
-deteksi identik dengan fitur saat training.
-
-    librosa.load(sr=16000, res_type='polyphase')            (3.1 resample)
-    -> potong chunk 5 detik, sisa < 5 detik dibuang           (3.2 chunking)
-    -> frame RMS < -80 dBFS = hening; chunk dibuang jika
-       frame aktif < 50%                                      (3.3 buang hening)
-    -> 16 deret per frame aktif: RMS, centroid, ZCR, MFCC1-13 (4.5)
-    -> gabung frame aktif semua chunk, ambil mean lalu std    (5.2)
-    => 32 fitur, urutan: 16 *_mean lalu 16 *_std
-
-Jangan ubah angka di bawah tanpa melatih ulang model lewat notebook.
-"""
-
 import librosa
 import numpy as np
 
@@ -27,6 +9,7 @@ HOP_LENGTH = 512
 N_MFCC = 13
 AMBANG_DB = -80
 MIN_FRAME_AKTIF = 0.5
+DURASI_AWAL = 1          # detik: penilaian awal sudah dimulai setelah 1 detik audio terkumpul
 
 NAMA_DERET = ["rms", "centroid", "zcr"] + [f"mfcc{i}" for i in range(1, 14)]
 FITUR = [f"{n}_mean" for n in NAMA_DERET] + [f"{n}_std" for n in NAMA_DERET]
@@ -87,12 +70,36 @@ def ekstrak_sinyal(sinyal, sr=SR):
     if not hasil:
         return None
     deret = np.hstack([fitur_per_frame(chunk, aktif, sr) for chunk, aktif in hasil])
+    fitur = agregasi(deret)
+    fitur["jumlah_chunk"] = len(hasil)
+    return fitur
+
+
+def agregasi(deret):
+    """16 deret per frame -> dict 32 fitur: semua *_mean lalu semua *_std (urutan sama dengan notebook)."""
     fitur = {}
     for nama, nilai in zip(NAMA_DERET, deret):
         fitur[f"{nama}_mean"] = nilai.mean()
     for nama, nilai in zip(NAMA_DERET, deret):
         fitur[f"{nama}_std"] = nilai.std()
-    fitur["jumlah_chunk"] = len(hasil)
+    return fitur
+
+
+def ekstrak_awal(sinyal, sr=SR):
+    """Penilaian awal saat audio belum genap 5 detik (1-4 detik pertama pemantauan).
+
+    Seluruh sinyal yang ada diperlakukan sebagai satu chunk, lalu memakai aturan buang hening
+    dan fitur yang sama. Hasilnya sedikit kurang akurat dibanding chunk 5 detik penuh,
+    tetapi sistem bisa langsung memberi penilaian tanpa menunggu.
+    """
+    sinyal = np.asarray(sinyal, dtype=np.float32)
+    if len(sinyal) < int(DURASI_AWAL * sr):
+        return None
+    aktif = frame_aktif(sinyal)
+    if aktif.mean() < MIN_FRAME_AKTIF:
+        return None
+    fitur = agregasi(fitur_per_frame(sinyal, aktif, sr))
+    fitur["jumlah_chunk"] = 1
     return fitur
 
 

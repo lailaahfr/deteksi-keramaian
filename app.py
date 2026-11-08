@@ -1,21 +1,3 @@
-"""
-app.py - Sistem web deteksi keramaian lab
-=========================================
-Memakai model terbaik dari notebook `klasifikasi-audio.ipynb`
-(file model/model_terbaik.joblib yang dibuat di Bab 9 notebook).
-
-Menjalankan:
-    python app.py               # buka http://localhost:5000 di PC lab
-    python app.py --dev         # mode pengembangan (restart otomatis saat file diubah)
-    gunicorn app:app --workers 1 --threads 8 --bind 0.0.0.0:$PORT   # hosting online
-
-Alur mode Pantau:
-    mic browser (sample rate asli, PCM 16-bit, tiap 1 detik) -> buffer per sesi
-    -> ambil jendela N detik terakhir (default 5) -> resample 16 kHz polifase
-    -> pipeline notebook (chunk 5 dtk, buang hening -80 dBFS, 32 fitur mean/std)
-    -> model.predict_proba -> aturan "3 dari 4" + jeda -> teguran
-"""
-
 import argparse
 import collections
 import os
@@ -227,15 +209,22 @@ def terima_audio(sid):
             s.sr, s.buffer = sr, np.zeros(0, dtype=np.float32)
         s.buffer = np.concatenate([s.buffer, blok])[-int(JENDELA_MAKS * sr):]
         n = int(s.jendela * sr)
-        if len(s.buffer) < n:
-            return jsonify({"siap": False, "terkumpul": round(len(s.buffer) / sr, 1),
-                            "dibutuhkan": s.jendela})
-        target = s.jendela * fa.SR
-        sinyal = fa.resample(s.buffer[-n:], sr)[:target]
-        if len(sinyal) < target:                        # jaga-jaga selisih pembulatan resample
-            sinyal = np.pad(sinyal, (0, target - len(sinyal)))
+        terkumpul = round(min(len(s.buffer), n) / sr, 1)
+        if len(s.buffer) < int(fa.DURASI_AWAL * sr):    # kurang dari 1 detik: tunggu sebentar
+            return jsonify({"siap": False, "terkumpul": terkumpul, "dibutuhkan": s.jendela})
+
+        # Penilaian langsung dimulai setelah 1 detik. Selama audio belum genap satu jendela
+        # (detik 1-4), seluruh audio yang ada dinilai sebagai penilaian awal.
+        awal = len(s.buffer) < n
+        if awal:
+            sinyal = fa.resample(s.buffer, sr)
+        else:
+            target = s.jendela * fa.SR
+            sinyal = fa.resample(s.buffer[-n:], sr)[:target]
+            if len(sinyal) < target:                    # jaga-jaga selisih pembulatan resample
+                sinyal = np.pad(sinyal, (0, target - len(sinyal)))
         t0 = time.perf_counter()
-        prob, status, tegur = s.detektor.nilai(sinyal, time.time())
+        prob, status, tegur = s.detektor.nilai(sinyal, time.time(), awal=awal)
         waktu_ms = (time.perf_counter() - t0) * 1000
         jml_berisik, jml_riwayat = int(sum(s.detektor.riwayat)), len(s.detektor.riwayat)
         ambang, jendela = s.detektor.ambang, s.jendela
@@ -244,6 +233,7 @@ def terima_audio(sid):
     level_db = float(20 * np.log10(np.sqrt(np.mean(sinyal[-fa.SR:] ** 2)) + 1e-10))
     return jsonify({"siap": True, "prob": round(prob, 4), "status": status, "tegur": bool(tegur),
                     "ambang": ambang, "jendela": jendela, "level_db": round(level_db, 1),
+                    "awal": awal, "terkumpul": terkumpul,
                     "riwayat_berisik": jml_berisik, "riwayat_isi": jml_riwayat,
                     "waktu_ms": round(waktu_ms, 1)})
 
